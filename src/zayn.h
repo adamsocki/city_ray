@@ -7,6 +7,7 @@
 struct Zayn {
     bool isRunning;
 
+    bool inZone_001;
     Camera3D camera;
 
     Model car;
