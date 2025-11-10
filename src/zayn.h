@@ -2,7 +2,7 @@
 #define ZAYN_H
 
 #include "raylib.h"
-
+#include "roadway.h"
 
 struct Zayn {
     bool isRunning;
@@ -16,6 +16,7 @@ struct Zayn {
     BoundingBox playerBounds;
     Vector3 playerSize;  // Width, Height, Depth of the bounding box
     bool showBounds;     // Debug flag to show bounding box
+    Roadway roadway;
 };
 
 void Init_Zayn(Zayn* zayn);

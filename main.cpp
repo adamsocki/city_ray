@@ -2,7 +2,6 @@
 #define RAYGUI_IMPLEMENTATION
 #include "raygui.h"
 
-
 #include "src/zayn.h"
 #include "src/editor/editor.h"
 #include "src/level_object.h"       
@@ -10,11 +9,6 @@
 
 int main(void)
 {
-
-
-
-
-    // Initialize window
     const int screenWidth = 800;
     const int screenHeight = 450;
     SetConfigFlags(FLAG_VSYNC_HINT);
@@ -50,7 +44,6 @@ int main(void)
             Update_Zayn(&zaynInstance);
         }
 
-        // Render
         BeginDrawing();
             ClearBackground(BLACK);
 
@@ -92,6 +85,19 @@ int main(void)
                 Editor_Render3D(&editor, &level);
                 Editor_RenderUI(&editor, &level, screenWidth, screenHeight);
             }
+
+            BeginMode3D(zaynInstance.camera);
+
+            DrawGrid(20, 1.0f);
+            Render_Roadway(zaynInstance.roadway, DARKGRAY);
+
+            DrawModel(zaynInstance.car, (Vector3){ 1.0f, 0.0f, -5.5f }, 10.0f, WHITE);
+
+            EndMode3D();
+
+            int centerX = screenWidth / 2;
+            int centerY = screenHeight / 2;
+            GuiDrawIcon(ICON_TARGET_POINT, centerX - 8, centerY - 8, 1, WHITE);
         EndDrawing();
     }
 

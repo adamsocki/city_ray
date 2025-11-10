@@ -2,22 +2,24 @@
 #include "camera.h"
 #include "raymath.h"
 
-void Init_Zayn(Zayn* zayn) 
+void Init_Zayn(Zayn* zayn)
 {
     zayn->isRunning = true;
     zayn->inZone_001 = false;
 
     Init_Camera(&zayn->camera);
-    
+
     zayn->car = LoadModel("resources/MacintoshClassic.glb");
     
     // Initialize player bounding box
     zayn->playerSize = (Vector3){ 1.0f, 2.0f, 1.0f };  // Width, Height, Depth
     zayn->showBounds = true;  // Show bounds by default for debugging
     UpdatePlayerBounds(zayn);
+
+    Init_Roadway(&zayn->roadway, 6, 8.0f, 1.5f);
 }
 
-void Update_Zayn(Zayn* zayn) 
+void Update_Zayn(Zayn* zayn)
 {
     Update_Camera(&zayn->camera);
     
@@ -137,3 +139,6 @@ bool PlayerCollisionCheck(Vector3 newPosition)
     
     return false; // No collision
 }
+=======
+}
+>>>>>>> a1415fa0bcd23cba78fafd4a6624d711d725fe9a
