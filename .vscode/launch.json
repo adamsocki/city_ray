@@ -2,11 +2,20 @@
     "version": "0.2.0",
     "configurations": [
         {
-            "name": "Run raylib",
-            "type": "node-terminal",
-            "request": "launch",
-            "command": "make && ./hello",
-            "cwd": "${workspaceFolder}"
+            "name": "Debug hello_mac (lldb)",
+        "type": "cppdbg",
+        "request": "launch",
+        "program": "${workspaceFolder}/hello_mac",
+        "args": [],
+        "stopAtEntry": false,
+        "cwd": "${workspaceFolder}",
+        "environment": [],
+        "externalConsole": false,
+        "MIMode": "lldb",
+        "preLaunchTask": "make: debug",
+        "setupCommands": [
+          { "text": "-enable-pretty-printing" }
+        ]
         }
     ]
 }

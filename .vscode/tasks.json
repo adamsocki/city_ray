@@ -18,6 +18,17 @@
             "command": "make clean",
             "problemMatcher": [],
             "detail": "Clean build artifacts"
-        }
+        },
+        {
+            "label": "make: debug",
+            "type": "shell",
+            "command": "make",
+            "args": ["CFLAGS+= -g -O0"],
+            "options": {
+              "cwd": "${workspaceFolder}"
+            },
+            "group": { "kind": "build", "isDefault": true },
+            "problemMatcher": ["$gcc"]
+          }
     ]
 }

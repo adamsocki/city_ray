@@ -4,7 +4,9 @@
 
 
 #include "src/zayn.h"
-
+#include "src/editor/editor.h"
+#include "src/level_object.h"       
+#include "src/level_serializer.h"
 
 int main(void)
 {
@@ -18,48 +20,78 @@ int main(void)
     SetConfigFlags(FLAG_VSYNC_HINT);
     InitWindow(screenWidth, screenHeight, "raylib - Hello World");
 
-    // SetTargetFPS(60);
+    GuiLoadStyle("resources/raygui/style_jungle.rgs");
 
+    // Play mode state
     Zayn zaynInstance;
     Init_Zayn(&zaynInstance);
 
-    bool showMessageBox = false;
-    GuiLoadStyle("resources/raygui/style_jungle.rgs");
+    // Editor state
+    EditorState editor;
+    Editor_Init(&editor, screenWidth, screenHeight);
 
-    // Main game loop
+    LevelObjects level;
+    LO_Init(&level);
+
+    bool showMessageBox = false;
+
     while (!WindowShouldClose())
     {
+        // Toggle editor with Tab
+        if (IsKeyPressed(KEY_TAB)) {
+            printf("Editor toggled\n");
+            Editor_Toggle(&editor);
+        }
+
         // Logic
-        Update_Zayn(&zaynInstance);
+        if (editor.enabled) {
+            Editor_Update(&editor, &level);
+        } else {
+            Update_Zayn(&zaynInstance);
+        }
 
         // Render
         BeginDrawing();
             ClearBackground(BLACK);
 
-            if (zaynInstance.inZone_001)
+            if (!editor.enabled)
             {
-                if (GuiButton((Rectangle){ 24, 24, 120, 30 }, "#191#Show Message")) showMessageBox = true;
+                if (zaynInstance.inZone_001)
+                {
+                    if (GuiButton((Rectangle){ 24, 24, 120, 30 }, "#191#Show Message")) showMessageBox = true;
+                }
 
+                BeginMode3D(zaynInstance.camera);
+
+                // Draw grid floor for orientation
+                DrawGrid(20, 1.0f);
+
+                DrawModel(zaynInstance.car, (Vector3){ 1.0f, 0.0f, -5.5f }, 10.0f, WHITE);
+
+                // Draw bounding boxes
+                DrawPlayerBounds(&zaynInstance);
+
+                EndMode3D();
+
+                // Draw crosshair at center of screen
+                int centerX = screenWidth / 2;
+                int centerY = screenHeight / 2;
+                GuiDrawIcon(ICON_TARGET_POINT, centerX - 8, centerY - 8, 1, WHITE);
+
+                // Draw controls info
+                DrawText("Play: WASD | Q/E up/down | B bounds | Tab editor", 10, screenHeight - 30, 16, LIGHTGRAY);
+                if (zaynInstance.showBounds) {
+                    DrawText("Bounding Box: ON", 10, screenHeight - 50, 16, GREEN);
+                } else {
+                    DrawText("Bounding Box: OFF", 10, screenHeight - 50, 16, RED);
+                }
             }
-
-            BeginMode3D(zaynInstance.camera);
-
-            // Draw grid floor for orientation
-            DrawGrid(20, 1.0f);
-
-            // Draw a reference plane at y = 0
-            // DrawPlane((Vector3){ 0.0f, -1.0f, 0.0f }, (Vector2){ 20.0f, 20.0f }, DARKGRAY);
-
-            DrawModel(zaynInstance.car, (Vector3){ 1.0f, 0.0f, -5.5f }, 10.0f, WHITE);
-
-            EndMode3D();
-
-            // Draw crosshair at center of screen
-            int centerX = screenWidth / 2;
-            int centerY = screenHeight / 2;
-            GuiDrawIcon(ICON_TARGET_POINT, centerX - 8, centerY - 8, 1, WHITE);
-
-            // DrawText("Hello, raylib!", 190, 200, 20, LIGHTGRAY);
+            else
+            {
+                // Editor 3D + UI
+                Editor_Render3D(&editor, &level);
+                Editor_RenderUI(&editor, &level, screenWidth, screenHeight);
+            }
         EndDrawing();
     }
 

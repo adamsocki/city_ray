@@ -1,7 +1,7 @@
 CC = g++
 
 # Automatically find all .cpp files in current directory and src/
-SOURCES = $(wildcard *.cpp src/*.cpp)
+SOURCES = $(wildcard *.cpp src/*.cpp src/*/*.cpp)
 
 # Detect OS and set target name and flags
 ifeq ($(OS),Windows_NT)
@@ -21,6 +21,8 @@ else
 		LDFLAGS = $(shell pkg-config --libs raylib)
 	endif
 endif
+
+CFLAGS += -I.
 
 $(TARGET): $(SOURCES)
 	$(CC) $(SOURCES) -o $(TARGET) $(CFLAGS) $(LDFLAGS)
