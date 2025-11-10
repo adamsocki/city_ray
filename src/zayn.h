@@ -2,7 +2,7 @@
 #define ZAYN_H
 
 #include "raylib.h"
-
+#include "roadway.h"
 
 struct Zayn {
     bool isRunning;
@@ -11,6 +11,7 @@ struct Zayn {
     Camera3D camera;
 
     Model car;
+    Roadway roadway;
 };
 
 void Init_Zayn(Zayn* zayn);
