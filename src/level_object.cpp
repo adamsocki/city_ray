@@ -19,24 +19,61 @@ void LO_Init(LevelObjects* lo) {
     lo->showBounds = true;
 }
 
-static BoundingBox ComputeModelBounds(const Model* model, Vector3 position, Vector3 scale) {
-    // Approximation: use model's mesh bounds scaled and translated (no rotation for bounds simplicity)
-    BoundingBox bb = { {0,0,0},{0,0,0} };
+static BoundingBox ComputeModelBounds(const Model* model, Vector3 position, Vector3 scale, Vector3 rotation) {
+    // Get the base mesh bounding box
+    BoundingBox baseBB = { {0,0,0},{0,0,0} };
     if (model->meshCount > 0) {
-        bb = GetMeshBoundingBox(model->meshes[0]);
+        baseBB = GetMeshBoundingBox(model->meshes[0]);
     } else {
-        bb.min = (Vector3){-0.5f,-0.5f,-0.5f};
-        bb.max = (Vector3){ 0.5f, 0.5f, 0.5f};
+        baseBB.min = (Vector3){-0.5f,-0.5f,-0.5f};
+        baseBB.max = (Vector3){ 0.5f, 0.5f, 0.5f};
     }
-    bb.min = Vector3Multiply(bb.min, scale);
-    bb.max = Vector3Multiply(bb.max, scale);
-    bb.min = Vector3Add(bb.min, position);
-    bb.max = Vector3Add(bb.max, position);
-    return bb;
+
+    // Create transformation matrix with scale and rotation
+    Matrix matScale = MatrixScale(scale.x, scale.y, scale.z);
+    Matrix matRotation = MatrixRotateXYZ((Vector3){
+        rotation.x * DEG2RAD,
+        rotation.y * DEG2RAD,
+        rotation.z * DEG2RAD
+    });
+    Matrix transform = MatrixMultiply(matScale, matRotation);
+
+    // Transform all 8 corners of the bounding box
+    Vector3 corners[8] = {
+        {baseBB.min.x, baseBB.min.y, baseBB.min.z},
+        {baseBB.max.x, baseBB.min.y, baseBB.min.z},
+        {baseBB.min.x, baseBB.max.y, baseBB.min.z},
+        {baseBB.max.x, baseBB.max.y, baseBB.min.z},
+        {baseBB.min.x, baseBB.min.y, baseBB.max.z},
+        {baseBB.max.x, baseBB.min.y, baseBB.max.z},
+        {baseBB.min.x, baseBB.max.y, baseBB.max.z},
+        {baseBB.max.x, baseBB.max.y, baseBB.max.z}
+    };
+
+    // Find the min and max of all transformed corners
+    Vector3 minBounds = {1e9f, 1e9f, 1e9f};
+    Vector3 maxBounds = {-1e9f, -1e9f, -1e9f};
+
+    for (int i = 0; i < 8; i++) {
+        Vector3 transformed = Vector3Transform(corners[i], transform);
+
+        if (transformed.x < minBounds.x) minBounds.x = transformed.x;
+        if (transformed.y < minBounds.y) minBounds.y = transformed.y;
+        if (transformed.z < minBounds.z) minBounds.z = transformed.z;
+        if (transformed.x > maxBounds.x) maxBounds.x = transformed.x;
+        if (transformed.y > maxBounds.y) maxBounds.y = transformed.y;
+        if (transformed.z > maxBounds.z) maxBounds.z = transformed.z;
+    }
+
+    // Translate to final position
+    BoundingBox result;
+    result.min = Vector3Add(minBounds, position);
+    result.max = Vector3Add(maxBounds, position);
+    return result;
 }
 
 void LO_RecalcBounds(LevelObject* o) {
-    o->bounds = ComputeModelBounds(&o->model, o->position, o->scale);
+    o->bounds = ComputeModelBounds(&o->model, o->position, o->scale, o->rotation);
 }
 
 int LO_Add(LevelObjects* lo, const char* name, Vector3 pos, Vector3 rot, Vector3 scale) {

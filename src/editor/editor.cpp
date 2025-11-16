@@ -2,12 +2,34 @@
 #include "raymath.h"
 #include "raygui.h"
 #include "../level_serializer.h"
+#include "rlgl.h"
 #include <math.h>
 #include <stdio.h>
+#include <string.h>
+#include <stdlib.h>
 
 static Ray Editor_GetMouseRay3D(const EditorState* ed) {
     Vector2 mouse = GetMousePosition();
     return GetMouseRay(mouse, ed->camera);
+}
+
+// Helper function to draw a model with full XYZ rotation support
+static void DrawModelWithRotation(Model model, Vector3 position, Vector3 rotation, Vector3 scale, Color tint) {
+    // Convert rotation from degrees to a rotation matrix
+    Matrix matScale = MatrixScale(scale.x, scale.y, scale.z);
+    Matrix matRotation = MatrixRotateXYZ((Vector3){
+        rotation.x * DEG2RAD,
+        rotation.y * DEG2RAD,
+        rotation.z * DEG2RAD
+    });
+    Matrix matTranslation = MatrixTranslate(position.x, position.y, position.z);
+    Matrix matTransform = MatrixMultiply(MatrixMultiply(matScale, matRotation), matTranslation);
+
+    // Apply transformation and draw
+    rlPushMatrix();
+    rlMultMatrixf(MatrixToFloat(matTransform));
+    DrawModel(model, (Vector3){0, 0, 0}, 1.0f, tint);
+    rlPopMatrix();
 }
 
 static int Editor_RaycastPick(const EditorState* ed, const LevelObjects* lo) {
@@ -28,23 +50,27 @@ static int Editor_RaycastPick(const EditorState* ed, const LevelObjects* lo) {
 }
 
 static void Editor_UpdateCamera(EditorState* ed) {
-    // simple free-fly flycam (similar to your camera.cpp but local to editor)
+    // Simple free-fly camera with improved controls
     float mouseSensitivity = 0.12f;
     float speed = 8.0f * GetFrameTime();
-    static float pitch = 0.0f, yaw = -90.0f;
+
+    // Increase speed when shift is held
+    if (IsKeyDown(KEY_LEFT_SHIFT) || IsKeyDown(KEY_RIGHT_SHIFT)) {
+        speed *= 3.0f;
+    }
 
     if (!IsMouseButtonDown(MOUSE_RIGHT_BUTTON)) return;
 
     Vector2 delta = GetMouseDelta();
-    yaw += delta.x * mouseSensitivity;
-    pitch -= delta.y * mouseSensitivity;
-    if (pitch > 89.0f) pitch = 89.0f;
-    if (pitch < -89.0f) pitch = -89.0f;
+    ed->cameraYaw += delta.x * mouseSensitivity;
+    ed->cameraPitch -= delta.y * mouseSensitivity;
+    if (ed->cameraPitch > 89.0f) ed->cameraPitch = 89.0f;
+    if (ed->cameraPitch < -89.0f) ed->cameraPitch = -89.0f;
 
     Vector3 dir = {
-        cosf(DEG2RAD * yaw) * cosf(DEG2RAD * pitch),
-        sinf(DEG2RAD * pitch),
-        sinf(DEG2RAD * yaw) * cosf(DEG2RAD * pitch)
+        cosf(DEG2RAD * ed->cameraYaw) * cosf(DEG2RAD * ed->cameraPitch),
+        sinf(DEG2RAD * ed->cameraPitch),
+        sinf(DEG2RAD * ed->cameraYaw) * cosf(DEG2RAD * ed->cameraPitch)
     };
     dir = Vector3Normalize(dir);
     Vector3 forward = { dir.x, 0.0f, dir.z };
@@ -64,6 +90,7 @@ static void Editor_UpdateCamera(EditorState* ed) {
 void Editor_Init(EditorState* ed, int screenWidth, int screenHeight) {
     ed->enabled = false;
     ed->showUI = true;
+    ed->showHelp = false;
     ed->mode = EDIT_MODE_SELECT;
     ed->selectedId = -1;
     ed->bboxEdit = false;
@@ -75,6 +102,22 @@ void Editor_Init(EditorState* ed, int screenWidth, int screenHeight) {
     ed->dragStartRot = (Vector3){0,0,0};
     ed->dragStartScale = (Vector3){1,1,1};
     ed->isDragging = false;
+    ed->editTextActive = false;
+
+    // Initialize camera angles
+    ed->cameraPitch = 0.0f;
+    ed->cameraYaw = -90.0f;
+
+    // Initialize text buffers
+    memset(ed->editPosX, 0, sizeof(ed->editPosX));
+    memset(ed->editPosY, 0, sizeof(ed->editPosY));
+    memset(ed->editPosZ, 0, sizeof(ed->editPosZ));
+    memset(ed->editRotX, 0, sizeof(ed->editRotX));
+    memset(ed->editRotY, 0, sizeof(ed->editRotY));
+    memset(ed->editRotZ, 0, sizeof(ed->editRotZ));
+    memset(ed->editScaleX, 0, sizeof(ed->editScaleX));
+    memset(ed->editScaleY, 0, sizeof(ed->editScaleY));
+    memset(ed->editScaleZ, 0, sizeof(ed->editScaleZ));
 
     ed->camera.position = (Vector3){ 3.0f, 2.0f, 6.0f };
     ed->camera.target = (Vector3){ 0.0f, 1.0f, 0.0f };
@@ -97,6 +140,11 @@ void Editor_Toggle(EditorState* ed) {
 }
 
 static void Editor_HandleShortcuts(EditorState* ed, LevelObjects* lo) {
+    // Toggle help with F1
+    if (IsKeyPressed(KEY_F1)) {
+        ed->showHelp = !ed->showHelp;
+    }
+
     // Mode shortcuts (only when not dragging to avoid conflicts)
     if (!ed->isDragging) {
         if (IsKeyPressed(KEY_G)) ed->mode = EDIT_MODE_TRANSLATE;
@@ -214,31 +262,53 @@ void Editor_Update(EditorState* ed, LevelObjects* lo) {
     Editor_Manipulate(ed, lo);
 }
 
-static void DrawAxisGizmo(const Vector3 pos, const Vector3 activeAxis, float len) {
+static void DrawAxisGizmo(const Vector3 pos, const Vector3 activeAxis, float len, EditMode mode) {
     // Highlight the active axis with thicker/brighter rendering
-    float thickActive = 0.04f;
-    float thickInactive = 0.02f;
+    float thickActive = 0.06f;
+    float thickInactive = 0.03f;
 
     // X axis (RED)
     Color xCol = (activeAxis.x > 0.5f) ? RED : Fade(RED, 0.5f);
     float xThick = (activeAxis.x > 0.5f) ? thickActive : thickInactive;
     DrawCylinderEx(pos, Vector3Add(pos, (Vector3){len,0,0}), xThick, xThick, 8, xCol);
-    DrawSphere(Vector3Add(pos, (Vector3){len,0,0}), 0.08f, xCol); // Arrow tip
+
+    // Different tip shapes based on mode
+    if (mode == EDIT_MODE_TRANSLATE) {
+        DrawCone(Vector3Add(pos, (Vector3){len,0,0}), 0.12f, 0.2f, 8, xCol);
+    } else if (mode == EDIT_MODE_ROTATE) {
+        DrawSphere(Vector3Add(pos, (Vector3){len,0,0}), 0.1f, xCol);
+    } else if (mode == EDIT_MODE_SCALE) {
+        DrawCube(Vector3Add(pos, (Vector3){len,0,0}), 0.15f, 0.15f, 0.15f, xCol);
+    }
 
     // Y axis (GREEN)
     Color yCol = (activeAxis.y > 0.5f) ? GREEN : Fade(GREEN, 0.5f);
     float yThick = (activeAxis.y > 0.5f) ? thickActive : thickInactive;
     DrawCylinderEx(pos, Vector3Add(pos, (Vector3){0,len,0}), yThick, yThick, 8, yCol);
-    DrawSphere(Vector3Add(pos, (Vector3){0,len,0}), 0.08f, yCol);
+
+    if (mode == EDIT_MODE_TRANSLATE) {
+        DrawCone(Vector3Add(pos, (Vector3){0,len,0}), 0.12f, 0.2f, 8, yCol);
+    } else if (mode == EDIT_MODE_ROTATE) {
+        DrawSphere(Vector3Add(pos, (Vector3){0,len,0}), 0.1f, yCol);
+    } else if (mode == EDIT_MODE_SCALE) {
+        DrawCube(Vector3Add(pos, (Vector3){0,len,0}), 0.15f, 0.15f, 0.15f, yCol);
+    }
 
     // Z axis (BLUE)
     Color zCol = (activeAxis.z > 0.5f) ? BLUE : Fade(BLUE, 0.5f);
     float zThick = (activeAxis.z > 0.5f) ? thickActive : thickInactive;
     DrawCylinderEx(pos, Vector3Add(pos, (Vector3){0,0,len}), zThick, zThick, 8, zCol);
-    DrawSphere(Vector3Add(pos, (Vector3){0,0,len}), 0.08f, zCol);
+
+    if (mode == EDIT_MODE_TRANSLATE) {
+        DrawCone(Vector3Add(pos, (Vector3){0,0,len}), 0.12f, 0.2f, 8, zCol);
+    } else if (mode == EDIT_MODE_ROTATE) {
+        DrawSphere(Vector3Add(pos, (Vector3){0,0,len}), 0.1f, zCol);
+    } else if (mode == EDIT_MODE_SCALE) {
+        DrawCube(Vector3Add(pos, (Vector3){0,0,len}), 0.15f, 0.15f, 0.15f, zCol);
+    }
 
     // Center sphere
-    DrawSphere(pos, 0.06f, WHITE);
+    DrawSphere(pos, 0.08f, WHITE);
 }
 
 void Editor_Render3D(EditorState* ed, const LevelObjects* lo) {
@@ -249,15 +319,14 @@ void Editor_Render3D(EditorState* ed, const LevelObjects* lo) {
 
     for (int i = 0; i < lo->count; i++) {
         const LevelObject* o = &lo->items[i];
-        DrawModelEx(o->model, o->position,
-                    (Vector3){0,1,0}, o->rotation.y,
-                    o->scale, WHITE);
+        // Use full XYZ rotation rendering
+        DrawModelWithRotation(o->model, o->position, o->rotation, o->scale, WHITE);
 
         if (ed->selectedId == o->id) {
             DrawBoundingBox(o->bounds, YELLOW);
             // Show gizmo with active axis highlighted
             if (ed->mode != EDIT_MODE_SELECT) {
-                DrawAxisGizmo(o->position, ed->gizmoAxis, 1.0f);
+                DrawAxisGizmo(o->position, ed->gizmoAxis, 1.0f, ed->mode);
             }
         } else {
             if (lo->showBounds) DrawBoundingBox(o->bounds, Fade(BLUE, 0.3f));
@@ -334,66 +403,89 @@ void Editor_RenderUI(EditorState* ed, LevelObjects* lo, int screenWidth, int scr
         const float labelW = 30.0f;
         const float inputW = panelW - labelW - 24.0f;
         const float inputH = 22.0f;
-        char buffer[32];
+
+        // Sync text buffers with current values
+        snprintf(ed->editPosX, sizeof(ed->editPosX), "%.2f", cur->position.x);
+        snprintf(ed->editPosY, sizeof(ed->editPosY), "%.2f", cur->position.y);
+        snprintf(ed->editPosZ, sizeof(ed->editPosZ), "%.2f", cur->position.z);
+        snprintf(ed->editRotX, sizeof(ed->editRotX), "%.1f", cur->rotation.x);
+        snprintf(ed->editRotY, sizeof(ed->editRotY), "%.1f", cur->rotation.y);
+        snprintf(ed->editRotZ, sizeof(ed->editRotZ), "%.1f", cur->rotation.z);
+        snprintf(ed->editScaleX, sizeof(ed->editScaleX), "%.2f", cur->scale.x);
+        snprintf(ed->editScaleY, sizeof(ed->editScaleY), "%.2f", cur->scale.y);
+        snprintf(ed->editScaleZ, sizeof(ed->editScaleZ), "%.2f", cur->scale.z);
 
         // Position
         GuiGroupBox((Rectangle){ side.x + 8.0f, y, panelW - 16.0f, 100.0f }, "Position");
         y += 22.0f;
 
-        snprintf(buffer, sizeof(buffer), "%.2f", cur->position.x);
         GuiLabel((Rectangle){ side.x + 16.0f, y, labelW, inputH }, "X");
-        GuiLabel((Rectangle){ side.x + 46.0f, y, inputW, inputH }, buffer);
+        if (GuiTextBox((Rectangle){ side.x + 46.0f, y, inputW, inputH }, ed->editPosX, 32, ed->editTextActive)) {
+            cur->position.x = (float)atof(ed->editPosX);
+            LO_RecalcBounds(cur);
+        }
         y += 24.0f;
 
-        snprintf(buffer, sizeof(buffer), "%.2f", cur->position.y);
         GuiLabel((Rectangle){ side.x + 16.0f, y, labelW, inputH }, "Y");
-        GuiLabel((Rectangle){ side.x + 46.0f, y, inputW, inputH }, buffer);
+        if (GuiTextBox((Rectangle){ side.x + 46.0f, y, inputW, inputH }, ed->editPosY, 32, ed->editTextActive)) {
+            cur->position.y = (float)atof(ed->editPosY);
+            LO_RecalcBounds(cur);
+        }
         y += 24.0f;
 
-        snprintf(buffer, sizeof(buffer), "%.2f", cur->position.z);
         GuiLabel((Rectangle){ side.x + 16.0f, y, labelW, inputH }, "Z");
-        GuiLabel((Rectangle){ side.x + 46.0f, y, inputW, inputH }, buffer);
+        if (GuiTextBox((Rectangle){ side.x + 46.0f, y, inputW, inputH }, ed->editPosZ, 32, ed->editTextActive)) {
+            cur->position.z = (float)atof(ed->editPosZ);
+            LO_RecalcBounds(cur);
+        }
         y += 32.0f;
 
         // Rotation
         GuiGroupBox((Rectangle){ side.x + 8.0f, y, panelW - 16.0f, 100.0f }, "Rotation");
         y += 22.0f;
 
-        snprintf(buffer, sizeof(buffer), "%.1f", cur->rotation.x);
         GuiLabel((Rectangle){ side.x + 16.0f, y, labelW, inputH }, "X");
-        GuiLabel((Rectangle){ side.x + 46.0f, y, inputW, inputH }, buffer);
+        if (GuiTextBox((Rectangle){ side.x + 46.0f, y, inputW, inputH }, ed->editRotX, 32, ed->editTextActive)) {
+            cur->rotation.x = (float)atof(ed->editRotX);
+        }
         y += 24.0f;
 
-        snprintf(buffer, sizeof(buffer), "%.1f", cur->rotation.y);
         GuiLabel((Rectangle){ side.x + 16.0f, y, labelW, inputH }, "Y");
-        GuiLabel((Rectangle){ side.x + 46.0f, y, inputW, inputH }, buffer);
+        if (GuiTextBox((Rectangle){ side.x + 46.0f, y, inputW, inputH }, ed->editRotY, 32, ed->editTextActive)) {
+            cur->rotation.y = (float)atof(ed->editRotY);
+        }
         y += 24.0f;
 
-        snprintf(buffer, sizeof(buffer), "%.1f", cur->rotation.z);
         GuiLabel((Rectangle){ side.x + 16.0f, y, labelW, inputH }, "Z");
-        GuiLabel((Rectangle){ side.x + 46.0f, y, inputW, inputH }, buffer);
+        if (GuiTextBox((Rectangle){ side.x + 46.0f, y, inputW, inputH }, ed->editRotZ, 32, ed->editTextActive)) {
+            cur->rotation.z = (float)atof(ed->editRotZ);
+        }
         y += 32.0f;
 
         // Scale
         GuiGroupBox((Rectangle){ side.x + 8.0f, y, panelW - 16.0f, 100.0f }, "Scale");
         y += 22.0f;
 
-        snprintf(buffer, sizeof(buffer), "%.2f", cur->scale.x);
         GuiLabel((Rectangle){ side.x + 16.0f, y, labelW, inputH }, "X");
-        GuiLabel((Rectangle){ side.x + 46.0f, y, inputW, inputH }, buffer);
+        if (GuiTextBox((Rectangle){ side.x + 46.0f, y, inputW, inputH }, ed->editScaleX, 32, ed->editTextActive)) {
+            cur->scale.x = fmaxf(0.01f, (float)atof(ed->editScaleX));
+            LO_RecalcBounds(cur);
+        }
         y += 24.0f;
 
-        snprintf(buffer, sizeof(buffer), "%.2f", cur->scale.y);
         GuiLabel((Rectangle){ side.x + 16.0f, y, labelW, inputH }, "Y");
-        GuiLabel((Rectangle){ side.x + 46.0f, y, inputW, inputH }, buffer);
+        if (GuiTextBox((Rectangle){ side.x + 46.0f, y, inputW, inputH }, ed->editScaleY, 32, ed->editTextActive)) {
+            cur->scale.y = fmaxf(0.01f, (float)atof(ed->editScaleY));
+            LO_RecalcBounds(cur);
+        }
         y += 24.0f;
 
-        snprintf(buffer, sizeof(buffer), "%.2f", cur->scale.z);
         GuiLabel((Rectangle){ side.x + 16.0f, y, labelW, inputH }, "Z");
-        GuiLabel((Rectangle){ side.x + 46.0f, y, inputW, inputH }, buffer);
+        if (GuiTextBox((Rectangle){ side.x + 46.0f, y, inputW, inputH }, ed->editScaleZ, 32, ed->editTextActive)) {
+            cur->scale.z = fmaxf(0.01f, (float)atof(ed->editScaleZ));
+            LO_RecalcBounds(cur);
+        }
         y += 26.0f;
-
-        LO_RecalcBounds(cur);
     }
 
     // Help text at bottom of screen
@@ -403,10 +495,79 @@ void Editor_RenderUI(EditorState* ed, LevelObjects* lo, int screenWidth, int scr
     else if (ed->mode == EDIT_MODE_SCALE) modeText = "Scale Mode - Press X/Y/Z then drag";
 
     DrawText(modeText, 8, screenHeight - 44, 14, WHITE);
-    DrawText("RMB+WASD: Camera | G: Move | R: Rotate | C: Scale | ESC: Select/Deselect",
+    DrawText("F1: Help | RMB+WASD: Camera | G: Move | R: Rotate | C: Scale | ESC: Deselect",
              8, screenHeight - 24, 14, LIGHTGRAY);
 
     if (ed->snap) {
-        DrawText("SNAP: ON (Ctrl)", screenWidth - 140, screenHeight - 24, 14, YELLOW);
+        DrawText("SNAP: ON (Ctrl)", screenWidth - 180, screenHeight - 24, 14, YELLOW);
+    }
+
+    // Keyboard shortcuts help panel
+    if (ed->showHelp) {
+        float helpW = 400.0f;
+        float helpH = 480.0f;
+        float helpX = (screenWidth - helpW) / 2.0f;
+        float helpY = (screenHeight - helpH) / 2.0f;
+
+        // Semi-transparent background overlay
+        DrawRectangle(0, 0, screenWidth, screenHeight, Fade(BLACK, 0.6f));
+
+        // Help panel
+        GuiPanel((Rectangle){helpX, helpY, helpW, helpH}, "Keyboard Shortcuts (F1 to close)");
+
+        float textY = helpY + 30.0f;
+        float textX = helpX + 16.0f;
+        int fontSize = 14;
+        int lineHeight = 20;
+
+        DrawText("EDITOR CONTROLS:", textX, textY, fontSize, YELLOW);
+        textY += lineHeight + 8;
+
+        DrawText("TAB           - Toggle Editor Mode", textX, textY, fontSize, WHITE);
+        textY += lineHeight;
+        DrawText("F1            - Toggle this help", textX, textY, fontSize, WHITE);
+        textY += lineHeight + 8;
+
+        DrawText("MODES:", textX, textY, fontSize, YELLOW);
+        textY += lineHeight + 8;
+
+        DrawText("G             - Move/Translate Mode", textX, textY, fontSize, WHITE);
+        textY += lineHeight;
+        DrawText("R             - Rotate Mode", textX, textY, fontSize, WHITE);
+        textY += lineHeight;
+        DrawText("C             - Scale Mode", textX, textY, fontSize, WHITE);
+        textY += lineHeight;
+        DrawText("ESC           - Select Mode / Deselect", textX, textY, fontSize, WHITE);
+        textY += lineHeight + 8;
+
+        DrawText("MANIPULATION:", textX, textY, fontSize, YELLOW);
+        textY += lineHeight + 8;
+
+        DrawText("X / Y / Z     - Select axis (Red/Green/Blue)", textX, textY, fontSize, WHITE);
+        textY += lineHeight;
+        DrawText("Left Click    - Start drag operation", textX, textY, fontSize, WHITE);
+        textY += lineHeight;
+        DrawText("Ctrl (hold)   - Enable grid snapping", textX, textY, fontSize, WHITE);
+        textY += lineHeight + 8;
+
+        DrawText("CAMERA:", textX, textY, fontSize, YELLOW);
+        textY += lineHeight + 8;
+
+        DrawText("RMB + Mouse   - Look around", textX, textY, fontSize, WHITE);
+        textY += lineHeight;
+        DrawText("RMB + WASD    - Move camera", textX, textY, fontSize, WHITE);
+        textY += lineHeight;
+        DrawText("RMB + Q/E     - Move down/up", textX, textY, fontSize, WHITE);
+        textY += lineHeight;
+        DrawText("Shift (hold)  - Faster camera movement", textX, textY, fontSize, WHITE);
+        textY += lineHeight + 8;
+
+        DrawText("OBJECTS:", textX, textY, fontSize, YELLOW);
+        textY += lineHeight + 8;
+
+        DrawText("Ctrl+D        - Duplicate selected object", textX, textY, fontSize, WHITE);
+        textY += lineHeight;
+        DrawText("Delete        - Remove selected object", textX, textY, fontSize, WHITE);
+        textY += lineHeight;
     }
 }
